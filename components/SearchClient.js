@@ -1,0 +1,14 @@
+"use client";
+import {useEffect,useState} from "react";
+import Link from "next/link";
+const cats=[["all","ALL RESEARCH"],["precious-metals","PRECIOUS METALS"],["macro","MACROECONOMIC ANALYSIS"],["monetary-policy","MONETARY POLICY"],["positioning","POSITIONING & COT"],["geopolitics","GEOPOLITICAL INTELLIGENCE"],["economic-indicators","ECONOMIC INDICATORS"],["market-data","MARKET DATA & CHARTS"]];
+export default function SearchClient(){
+ const [q,setQ]=useState(""),[cat,setCat]=useState("all"),[results,setResults]=useState([]),[searched,setSearched]=useState(false),[loading,setLoading]=useState(false);
+ async function search(){if(!q.trim()&&cat==="all"){setSearched(false);setResults([]);return}setLoading(true);const r=await fetch("/api/search?"+new URLSearchParams({q,category:cat}),{cache:"no-store"});const d=await r.json();setResults(d.articles||[]);setSearched(true);setLoading(false)}
+ useEffect(()=>{if(searched)search()},[cat]);
+ return <main className="search-page">
+  <section className="search-hero"><div className="search-hero-glow"/><div className="search-hero-inner"><span className="section-kicker light">RESEARCH INTELLIGENCE</span><h1>Search the Research Archive</h1><p>Explore financial analysis, macroeconomic research, market positioning and geopolitical intelligence.</p><form className="research-search-form" onSubmit={e=>{e.preventDefault();search()}}><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search gold, inflation, PCE, Federal Reserve..." /><button>{loading?"SEARCHING...":"SEARCH"}</button></form></div></section>
+  <section className="search-results-wrap"><div className="filter-row">{cats.map(([v,l])=><button key={v} className={"filter-chip "+(cat===v?"active":"")} onClick={()=>setCat(v)}>{l}</button>)}</div>
+  <div className="results-heading"><div><span className="section-kicker">{searched?"SEARCH RESULTS":"RESEARCH ARCHIVE"}</span><h2>{q.trim()?`RESULTS FOR “${q.trim()}”`:"Explore the research archive"}</h2></div>{searched&&<span className="result-count">{results.length} {results.length===1?"ARTICLE":"ARTICLES"}</span>}</div>
+  {!searched?<div className="search-empty large"><span>BEGIN YOUR RESEARCH</span><p>Search by topic, market, indicator or category.</p></div>:results.length?<div className="search-results-grid">{results.map(a=><Link href={"/article/"+a.slug} className="search-result-card" key={a.id}><div className="search-result-meta"><span>{a.categoryLabel}</span><span>{a.date}</span></div><h3>{a.title}</h3><p>{a.excerpt||"Read the full research analysis."}</p><span className="read-link">READ ANALYSIS →</span></Link>)}</div>:<div className="search-empty large"><span>NO MATCHING RESEARCH</span><p>Try another term or broaden the category filter.</p></div>}</section></main>
+}
