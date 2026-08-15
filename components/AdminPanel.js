@@ -42,7 +42,7 @@ export default function AdminPanel() {
     setMessage("");
 
     try {
-      const r = await fetch("/api/login", {
+      const response = await fetch("/api/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -53,21 +53,18 @@ export default function AdminPanel() {
         }),
       });
 
-      const d = await r.json();
+      const data = await response.json();
 
-      if (r.ok) {
-        setLogged(true);
-        setMessage("");
-        await loadArticles();
-      } else {
-        setMessage(
-          d.error || "Login failed."
-        );
+      if (!response.ok) {
+        setMessage(data.error || "Login failed.");
+        return;
       }
-    } catch {
-      setMessage(
-        "Could not connect to the server."
-      );
+
+      setLogged(true);
+      setMessage("");
+    } catch (error) {
+      console.error("LOGIN ERROR:", error);
+      setMessage("Could not connect to the server.");
     } finally {
       setBusy(false);
     }
@@ -75,24 +72,19 @@ export default function AdminPanel() {
 
   async function loadArticles() {
     try {
-      const r = await fetch(
-        "/api/articles",
-        {
-          cache: "no-store",
-        }
-      );
+      const response = await fetch("/api/articles", {
+        cache: "no-store",
+      });
 
-      if (r.ok) {
-        const d = await r.json();
-
-        setArticles(
-          d.articles || []
-        );
+      if (!response.ok) {
+        return;
       }
-    } catch {
-      setMessage(
-        "Could not load articles."
-      );
+
+      const data = await response.json();
+
+      setArticles(data.articles || []);
+    } catch (error) {
+      console.error("LOAD ARTICLES ERROR:", error);
     }
   }
 
@@ -108,14 +100,11 @@ export default function AdminPanel() {
     setForm({
       id: article.id,
       title: article.title || "",
-      category:
-        article.category ||
-        "precious-metals",
+      category: article.category || "precious-metals",
       excerpt: article.excerpt || "",
       content: article.content || "",
       pdfUrl: article.pdfUrl || "",
-      status:
-        article.status || "published",
+      status: article.status || "published",
     });
 
     setPdfFile(null);
@@ -133,55 +122,116 @@ export default function AdminPanel() {
     setPdfFile(null);
     setMessage("");
 
-    const input =
-      document.getElementById(
-        "article-pdf"
-      );
+    const input = document.getElementById("article-pdf");
 
     if (input) {
       input.value = "";
     }
   }
 
+  /*
+   * IMPORTANT:
+   * PDF upload deliberately uses XMLHttpRequest.
+   *
+   * We DO NOT manually set Content-Type.
+   * The browser automatically creates:
+   *
+   * multipart/form-data; boundary=...
+   *
+   * This prevents the "Content-Type was not one of
+   * multipart/form-data..." error.
+   */
   async function uploadPdf() {
     if (!pdfFile) {
       return null;
     }
 
-    const uploadData =
-      new FormData();
+    if (pdfFile.type !== "application/pdf") {
+      throw new Error("Please select a PDF file.");
+    }
 
-    uploadData.append(
-      "file",
-      pdfFile
-    );
+    if (pdfFile.size > 25 * 1024 * 1024) {
+      throw new Error("PDF must be smaller than 25 MB.");
+    }
 
-    const response =
-      await fetch(
+    const uploadData = new FormData();
+
+    uploadData.append("file", pdfFile);
+
+    const response = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      xhr.open(
+        "POST",
         "/api/articles/upload",
-        {
-          method: "POST",
-          body: uploadData,
-        }
+        true
       );
 
-    const data =
-      await response.json();
+      /*
+       * Send the existing admin cookie with the request.
+       */
+      xhr.withCredentials = true;
+
+      xhr.onload = () => {
+        let data = {};
+
+        try {
+          data = JSON.parse(xhr.responseText || "{}");
+        } catch {
+          data = {
+            error:
+              xhr.responseText ||
+              "Invalid server response.",
+          };
+        }
+
+        resolve({
+          ok:
+            xhr.status >= 200 &&
+            xhr.status < 300,
+          status: xhr.status,
+          data,
+        });
+      };
+
+      xhr.onerror = () => {
+        reject(
+          new Error(
+            "Could not connect to the PDF upload server."
+          )
+        );
+      };
+
+      xhr.onabort = () => {
+        reject(
+          new Error(
+            "PDF upload was cancelled."
+          )
+        );
+      };
+
+      /*
+       * DO NOT set Content-Type here.
+       *
+       * The browser must create the multipart boundary.
+       */
+      xhr.send(uploadData);
+    });
 
     if (!response.ok) {
       throw new Error(
-        data.error ||
-          "Could not upload PDF."
+        response.data?.error ||
+          `PDF upload failed (${response.status}).`
       );
     }
 
-    if (!data.url) {
+    if (!response.data?.url) {
       throw new Error(
-        "PDF uploaded but no URL was returned."
+        "PDF uploaded but the server did not return a PDF URL."
       );
     }
 
-    return data.url;
+    return response.data.url;
   }
 
   async function saveArticle(e) {
@@ -201,7 +251,9 @@ export default function AdminPanel() {
       return;
     }
 
-    // A new article must have a PDF.
+    /*
+     * New articles require a PDF.
+     */
     if (!editing && !pdfFile) {
       setMessage(
         "Please select a PDF before publishing."
@@ -209,21 +261,24 @@ export default function AdminPanel() {
       return;
     }
 
+    /*
+     * Editing an existing article:
+     * keep its existing PDF unless a new one is selected.
+     */
+
     setBusy(true);
     setMessage("");
 
     try {
-      let pdfUrl =
-        form.pdfUrl || "";
+      let pdfUrl = form.pdfUrl || "";
 
-      // Upload a new PDF if selected.
+      /*
+       * Upload PDF first.
+       */
       if (pdfFile) {
-        setMessage(
-          "Uploading PDF..."
-        );
+        setMessage("Uploading PDF...");
 
-        pdfUrl =
-          await uploadPdf();
+        pdfUrl = await uploadPdf();
       }
 
       if (!pdfUrl) {
@@ -232,41 +287,38 @@ export default function AdminPanel() {
         );
       }
 
-      setMessage(
-        "Publishing article..."
-      );
+      setMessage("Publishing article...");
 
       const payload = {
         id: form.id,
         title: form.title.trim(),
         category: form.category,
-        excerpt:
-          form.excerpt.trim(),
+        excerpt: form.excerpt.trim(),
+
+        /*
+         * PDF articles do not use the rich HTML editor.
+         * The PDF itself remains unchanged.
+         */
         content: "",
+
         pdfUrl,
         status: form.status,
       };
 
-      const response =
-        await fetch(
-          "/api/articles",
-          {
-            method:
-              editing
-                ? "PUT"
-                : "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify(
-              payload
-            ),
-          }
-        );
+      const response = await fetch(
+        "/api/articles",
+        {
+          method: editing ? "PUT" : "POST",
 
-      const data =
-        await response.json();
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await response.json();
 
       if (!response.ok) {
         throw new Error(
@@ -282,6 +334,7 @@ export default function AdminPanel() {
       );
 
       resetForm();
+
       await loadArticles();
     } catch (error) {
       console.error(
@@ -302,11 +355,11 @@ export default function AdminPanel() {
     id,
     title
   ) {
-    if (
-      !window.confirm(
-        `Delete "${title}"?\n\nThis cannot be undone.`
-      )
-    ) {
+    const confirmed = window.confirm(
+      `Delete "${title}"?\n\nThis cannot be undone.`
+    );
+
+    if (!confirmed) {
       return;
     }
 
@@ -314,18 +367,14 @@ export default function AdminPanel() {
     setMessage("");
 
     try {
-      const response =
-        await fetch(
-          `/api/articles?id=${encodeURIComponent(
-            id
-          )}`,
-          {
-            method: "DELETE",
-          }
-        );
+      const response = await fetch(
+        `/api/articles?id=${encodeURIComponent(id)}`,
+        {
+          method: "DELETE",
+        }
+      );
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
       if (!response.ok) {
         throw new Error(
@@ -334,9 +383,7 @@ export default function AdminPanel() {
         );
       }
 
-      setMessage(
-        "Article deleted."
-      );
+      setMessage("Article deleted.");
 
       if (form.id === id) {
         resetForm();
@@ -344,6 +391,11 @@ export default function AdminPanel() {
 
       await loadArticles();
     } catch (error) {
+      console.error(
+        "DELETE ARTICLE ERROR:",
+        error
+      );
+
       setMessage(
         error?.message ||
           "Could not delete article."
@@ -361,6 +413,11 @@ export default function AdminPanel() {
           method: "POST",
         }
       );
+    } catch (error) {
+      console.error(
+        "LOGOUT ERROR:",
+        error
+      );
     } finally {
       setLogged(false);
       setArticles([]);
@@ -368,6 +425,9 @@ export default function AdminPanel() {
     }
   }
 
+  /*
+   * LOGIN SCREEN
+   */
   if (!logged) {
     return (
       <main className="admin-shell">
@@ -435,6 +495,9 @@ export default function AdminPanel() {
     );
   }
 
+  /*
+   * ADMIN PANEL
+   */
   return (
     <main className="admin-shell">
       <style jsx global>{`
@@ -546,6 +609,7 @@ export default function AdminPanel() {
           font-weight: 900;
           letter-spacing: .08em;
           cursor: pointer;
+          text-decoration: none;
         }
 
         .small-btn:hover {
@@ -649,6 +713,7 @@ export default function AdminPanel() {
         <button
           onClick={logout}
           className="ghost"
+          disabled={busy}
         >
           LOG OUT
         </button>
@@ -785,11 +850,14 @@ export default function AdminPanel() {
                   type="file"
                   accept="application/pdf,.pdf"
                   onChange={(e) => {
-                    const file =
+                    const selectedFile =
                       e.target.files?.[0] ||
                       null;
 
-                    setPdfFile(file);
+                    setPdfFile(
+                      selectedFile
+                    );
+
                     setMessage("");
                   }}
                   disabled={busy}
@@ -830,11 +898,12 @@ export default function AdminPanel() {
                   )}
 
                 <div className="pdf-note">
-                  PDF only. Maximum file size:
-                  25 MB. Your original PDF is
-                  uploaded unchanged — text,
-                  images, graphs, fonts, layout,
-                  and page formatting are preserved.
+                  PDF only. Maximum file
+                  size: 25 MB. The original
+                  PDF is uploaded unchanged,
+                  including its text, images,
+                  graphs, fonts, layout and
+                  page formatting.
                 </div>
               </div>
             </label>
