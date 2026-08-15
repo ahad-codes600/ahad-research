@@ -1,104 +1,119 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
-const tools = [
-  ["bold", "B", "Bold"],
-  ["italic", "I", "Italic"],
-  ["underline", "U", "Underline"],
-  ["formatBlock", "H2", "Heading"],
-  ["insertUnorderedList", "• List", "Bulleted list"],
-  ["insertOrderedList", "1. List", "Numbered list"],
-  ["blockquote", "❝", "Quote"],
-];
-
-function normalizeInitial(value) {
-  if (!value) return "";
-  if (/<[a-z][\\s\\S]*>/i.test(value)) return value;
-  return value
-    .split(/\\n\\n+/)
-    .map(p => `<p>${p.replace(/\\n/g, "<br />")}</p>`)
-    .join("");
-}
-
-export default function RichEditor({ value, onChange }) {
-  const ref = useRef(null);
-  const [preview, setPreview] = useState(false);
-  const initialized = useRef(false);
+export default function RichEditor({ value, onChange, onFileChange }) {
+  const [fileName, setFileName] = useState("");
 
   useEffect(() => {
-    if (!initialized.current && ref.current) {
-      ref.current.innerHTML = normalizeInitial(value);
-      initialized.current = true;
+    if (value?.pdfFileName) {
+      setFileName(value.pdfFileName);
     }
   }, [value]);
 
-  function emit() {
-    onChange(ref.current?.innerHTML || "");
-  }
+  function handleFile(event) {
+    const file = event.target.files?.[0];
 
-  function command(cmd, arg = null) {
-    ref.current?.focus();
-    if (cmd === "formatBlock") document.execCommand(cmd, false, "<h2>");
-    else if (cmd === "blockquote") document.execCommand(cmd, false, null);
-    else document.execCommand(cmd, false, arg);
-    emit();
-  }
+    if (!file) return;
 
-  function addLink() {
-    const url = window.prompt("Enter the URL:");
-    if (!url) return;
-    command("createLink", url);
-  }
-
-  function addImage() {
-    const url = window.prompt("Enter an image/chart URL:");
-    if (!url) return;
-    command("insertImage", url);
-  }
-
-  function addTable() {
-    const rows = Number(window.prompt("Number of rows:", "3"));
-    const cols = Number(window.prompt("Number of columns:", "3"));
-    if (!rows || !cols || rows > 12 || cols > 8) return;
-    let html = '<table><tbody>';
-    for (let r = 0; r < rows; r++) {
-      html += "<tr>";
-      for (let c = 0; c < cols; c++) html += r === 0 ? "<th>Header</th>" : "<td>Cell</td>";
-      html += "</tr>";
+    if (file.type !== "application/pdf") {
+      alert("Please select a PDF file.");
+      event.target.value = "";
+      return;
     }
-    html += "</tbody></table><p><br /></p>";
-    ref.current?.focus();
-    document.execCommand("insertHTML", false, html);
-    emit();
+
+    if (file.size > 50 * 1024 * 1024) {
+      alert("PDF must be smaller than 50 MB.");
+      event.target.value = "";
+      return;
+    }
+
+    setFileName(file.name);
+
+    if (onFileChange) {
+      onFileChange(file);
+    }
   }
 
   return (
     <div className="rich-editor">
-      <div className="editor-toolbar" aria-label="Article formatting tools">
-        {tools.map(([cmd, label, title]) => (
-          <button type="button" key={cmd} title={title} onMouseDown={e=>e.preventDefault()} onClick={()=>command(cmd)}>{label}</button>
-        ))}
-        <span className="toolbar-divider" />
-        <button type="button" onMouseDown={e=>e.preventDefault()} onClick={addLink}>LINK</button>
-        <button type="button" onMouseDown={e=>e.preventDefault()} onClick={addImage}>IMAGE / CHART</button>
-        <button type="button" onMouseDown={e=>e.preventDefault()} onClick={addTable}>TABLE</button>
-        <button type="button" className={preview ? "active" : ""} onClick={()=>setPreview(!preview)}>{preview ? "EDIT" : "PREVIEW"}</button>
+      <div
+        style={{
+          border: "1px solid #d9dde3",
+          padding: "30px",
+          background: "#f8f9fa",
+          textAlign: "center",
+        }}
+      >
+        <div style={{ fontSize: "42px", marginBottom: "12px" }}>📄</div>
+
+        <h3
+          style={{
+            margin: "0 0 8px",
+            fontFamily: "Georgia, serif",
+            fontSize: "22px",
+          }}
+        >
+          Upload Research PDF
+        </h3>
+
+        <p
+          style={{
+            margin: "0 auto 20px",
+            maxWidth: "520px",
+            color: "#697383",
+            fontSize: "13px",
+            lineHeight: "1.6",
+          }}
+        >
+          Upload the finished PDF exactly as you created it. The PDF will be
+          stored and displayed as a PDF without converting its formatting,
+          images, charts, fonts, or layout into HTML.
+        </p>
+
+        <label
+          style={{
+            display: "inline-block",
+            padding: "12px 18px",
+            border: "1px solid #18212b",
+            background: "#18212b",
+            color: "#fff",
+            cursor: "pointer",
+            fontSize: "11px",
+            fontWeight: 900,
+            letterSpacing: ".08em",
+          }}
+        >
+          CHOOSE PDF
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            onChange={handleFile}
+            style={{ display: "none" }}
+          />
+        </label>
+
+        {fileName && (
+          <div
+            style={{
+              marginTop: "20px",
+              padding: "12px",
+              background: "#fff",
+              border: "1px solid #d9dde3",
+              fontSize: "13px",
+              fontWeight: 700,
+              wordBreak: "break-word",
+            }}
+          >
+            ✓ {fileName}
+          </div>
+        )}
       </div>
 
-      {preview ? (
-        <div className="rich-preview article-body" dangerouslySetInnerHTML={{__html: ref.current?.innerHTML || ""}} />
-      ) : (
-        <div
-          ref={ref}
-          className="rich-input"
-          contentEditable
-          suppressContentEditableWarning
-          onInput={emit}
-          data-placeholder="Write your market analysis here..."
-        />
-      )}
-      <div className="editor-help">Formatting is stored with the article. Use IMAGE / CHART for hosted images or chart screenshots.</div>
+      <div className="editor-help">
+        Upload your completed PDF. Its original design, images, graphs, tables,
+        fonts, colors, and page layout will remain inside the PDF.
+      </div>
     </div>
   );
 }
