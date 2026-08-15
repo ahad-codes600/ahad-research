@@ -24,16 +24,22 @@ const emptyForm = {
 
 export default function AdminPanel() {
   const [logged, setLogged] = useState(false);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const [message, setMessage] = useState("");
   const [articles, setArticles] = useState([]);
+
   const [form, setForm] = useState(emptyForm);
 
   const [pdfFile, setPdfFile] = useState(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  /* =========================================================
+     LOGIN
+  ========================================================= */
 
   async function login(e) {
     e.preventDefault();
@@ -47,13 +53,14 @@ export default function AdminPanel() {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify({
-          email,
+          email: email.trim(),
           password,
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         setMessage(data.error || "Login failed.");
@@ -70,19 +77,30 @@ export default function AdminPanel() {
     }
   }
 
+  /* =========================================================
+     LOAD ARTICLES
+  ========================================================= */
+
   async function loadArticles() {
     try {
       const response = await fetch("/api/articles", {
+        method: "GET",
         cache: "no-store",
+        credentials: "include",
       });
 
+      const data = await response.json().catch(() => ({}));
+
       if (!response.ok) {
+        console.error("LOAD ARTICLES ERROR:", data);
         return;
       }
 
-      const data = await response.json();
-
-      setArticles(data.articles || []);
+      setArticles(
+        Array.isArray(data.articles)
+          ? data.articles
+          : []
+      );
     } catch (error) {
       console.error("LOAD ARTICLES ERROR:", error);
     }
@@ -94,21 +112,37 @@ export default function AdminPanel() {
     }
   }, [logged]);
 
+  /* =========================================================
+     EDIT
+  ========================================================= */
+
   function startEdit(article) {
     setEditing(true);
 
     setForm({
-      id: article.id,
+      id: article.id || "",
       title: article.title || "",
-      category: article.category || "precious-metals",
+      category:
+        article.category || "precious-metals",
       excerpt: article.excerpt || "",
       content: article.content || "",
-      pdfUrl: article.pdfUrl || "",
-      status: article.status || "published",
+      pdfUrl:
+        article.pdfUrl ||
+        article.pdf_url ||
+        "",
+      status:
+        article.status || "published",
     });
 
     setPdfFile(null);
     setMessage("");
+
+    const input =
+      document.getElementById("article-pdf");
+
+    if (input) {
+      input.value = "";
+    }
 
     window.scrollTo({
       top: 0,
@@ -116,123 +150,162 @@ export default function AdminPanel() {
     });
   }
 
+  /* =========================================================
+     RESET
+  ========================================================= */
+
   function resetForm() {
     setEditing(false);
     setForm(emptyForm);
     setPdfFile(null);
     setMessage("");
 
-    const input = document.getElementById("article-pdf");
+    const input =
+      document.getElementById("article-pdf");
 
     if (input) {
       input.value = "";
     }
   }
 
-  /*
-   * IMPORTANT:
-   * PDF upload deliberately uses XMLHttpRequest.
-   *
-   * We DO NOT manually set Content-Type.
-   * The browser automatically creates:
-   *
-   * multipart/form-data; boundary=...
-   *
-   * This prevents the "Content-Type was not one of
-   * multipart/form-data..." error.
-   */
+  /* =========================================================
+     PDF FILE SELECTION
+  ========================================================= */
+
+  function handlePdfChange(e) {
+    const file =
+      e.target.files &&
+      e.target.files.length > 0
+        ? e.target.files[0]
+        : null;
+
+    setMessage("");
+
+    if (!file) {
+      setPdfFile(null);
+      return;
+    }
+
+    const fileName =
+      String(file.name || "").toLowerCase();
+
+    const isPdf =
+      fileName.endsWith(".pdf") ||
+      file.type === "application/pdf" ||
+      file.type === "application/octet-stream" ||
+      file.type === "";
+
+    if (!isPdf) {
+      setPdfFile(null);
+      e.target.value = "";
+
+      setMessage(
+        "Please select a PDF file."
+      );
+
+      return;
+    }
+
+    if (
+      file.size >
+      25 * 1024 * 1024
+    ) {
+      setPdfFile(null);
+      e.target.value = "";
+
+      setMessage(
+        "PDF must be smaller than 25 MB."
+      );
+
+      return;
+    }
+
+    setPdfFile(file);
+  }
+
+  /* =========================================================
+     PDF UPLOAD
+     
+     IMPORTANT:
+     We use FormData.
+     We DO NOT manually set Content-Type.
+     
+     The browser creates:
+     multipart/form-data; boundary=...
+  ========================================================= */
+
   async function uploadPdf() {
     if (!pdfFile) {
       return null;
     }
 
-    if (pdfFile.type !== "application/pdf") {
-      throw new Error("Please select a PDF file.");
+    const fileName =
+      String(pdfFile.name || "").toLowerCase();
+
+    const isPdf =
+      fileName.endsWith(".pdf") ||
+      pdfFile.type === "application/pdf" ||
+      pdfFile.type === "application/octet-stream" ||
+      pdfFile.type === "";
+
+    if (!isPdf) {
+      throw new Error(
+        "Please select a PDF file."
+      );
     }
 
-    if (pdfFile.size > 25 * 1024 * 1024) {
-      throw new Error("PDF must be smaller than 25 MB.");
+    if (
+      pdfFile.size >
+      25 * 1024 * 1024
+    ) {
+      throw new Error(
+        "PDF must be smaller than 25 MB."
+      );
     }
 
-    const uploadData = new FormData();
+    const uploadData =
+      new FormData();
 
-    uploadData.append("file", pdfFile);
+    uploadData.append(
+      "file",
+      pdfFile,
+      pdfFile.name
+    );
 
-    const response = await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-
-      xhr.open(
-        "POST",
+    const response =
+      await fetch(
         "/api/articles/upload",
-        true
+        {
+          method: "POST",
+          credentials: "include",
+          body: uploadData,
+        }
       );
 
-      /*
-       * Send the existing admin cookie with the request.
-       */
-      xhr.withCredentials = true;
-
-      xhr.onload = () => {
-        let data = {};
-
-        try {
-          data = JSON.parse(xhr.responseText || "{}");
-        } catch {
-          data = {
-            error:
-              xhr.responseText ||
-              "Invalid server response.",
-          };
-        }
-
-        resolve({
-          ok:
-            xhr.status >= 200 &&
-            xhr.status < 300,
-          status: xhr.status,
-          data,
-        });
-      };
-
-      xhr.onerror = () => {
-        reject(
-          new Error(
-            "Could not connect to the PDF upload server."
-          )
-        );
-      };
-
-      xhr.onabort = () => {
-        reject(
-          new Error(
-            "PDF upload was cancelled."
-          )
-        );
-      };
-
-      /*
-       * DO NOT set Content-Type here.
-       *
-       * The browser must create the multipart boundary.
-       */
-      xhr.send(uploadData);
-    });
+    const data =
+      await response
+        .json()
+        .catch(() => ({}));
 
     if (!response.ok) {
       throw new Error(
-        response.data?.error ||
+        data.error ||
           `PDF upload failed (${response.status}).`
       );
     }
 
-    if (!response.data?.url) {
+    if (!data.url) {
       throw new Error(
-        "PDF uploaded but the server did not return a PDF URL."
+        "PDF uploaded, but the server did not return a PDF URL."
       );
     }
 
-    return response.data.url;
+    return data.url;
   }
+
+  /* =========================================================
+     SAVE / PUBLISH ARTICLE
+  ========================================================= */
 
   async function saveArticle(e) {
     e.preventDefault();
@@ -252,34 +325,41 @@ export default function AdminPanel() {
     }
 
     /*
-     * New articles require a PDF.
-     */
+      New article:
+      PDF is required.
+    */
+
     if (!editing && !pdfFile) {
       setMessage(
-        "Please select a PDF before publishing."
+        "Please select a PDF file before publishing."
       );
       return;
     }
-
-    /*
-     * Editing an existing article:
-     * keep its existing PDF unless a new one is selected.
-     */
 
     setBusy(true);
     setMessage("");
 
     try {
-      let pdfUrl = form.pdfUrl || "";
+      let pdfUrl =
+        form.pdfUrl || "";
 
       /*
-       * Upload PDF first.
-       */
-      if (pdfFile) {
-        setMessage("Uploading PDF...");
+        Upload a new PDF if one was selected.
+      */
 
-        pdfUrl = await uploadPdf();
+      if (pdfFile) {
+        setMessage(
+          "Uploading PDF..."
+        );
+
+        pdfUrl =
+          await uploadPdf();
       }
+
+      /*
+        Existing article must still have
+        its previous PDF.
+      */
 
       if (!pdfUrl) {
         throw new Error(
@@ -287,7 +367,9 @@ export default function AdminPanel() {
         );
       }
 
-      setMessage("Publishing article...");
+      setMessage(
+        "Saving research..."
+      );
 
       const payload = {
         id: form.id,
@@ -296,29 +378,43 @@ export default function AdminPanel() {
         excerpt: form.excerpt.trim(),
 
         /*
-         * PDF articles do not use the rich HTML editor.
-         * The PDF itself remains unchanged.
-         */
+          PDF is the article itself.
+          We don't duplicate its contents
+          into the HTML editor.
+        */
         content: "",
 
         pdfUrl,
         status: form.status,
       };
 
-      const response = await fetch(
-        "/api/articles",
-        {
-          method: editing ? "PUT" : "POST",
+      const response =
+        await fetch(
+          "/api/articles",
+          {
+            method:
+              editing
+                ? "PUT"
+                : "POST",
 
-          headers: {
-            "Content-Type": "application/json",
-          },
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
 
-          body: JSON.stringify(payload),
-        }
-      );
+            credentials: "include",
 
-      const data = await response.json();
+            body:
+              JSON.stringify(
+                payload
+              ),
+          }
+        );
+
+      const data =
+        await response
+          .json()
+          .catch(() => ({}));
 
       if (!response.ok) {
         throw new Error(
@@ -351,13 +447,18 @@ export default function AdminPanel() {
     }
   }
 
+  /* =========================================================
+     DELETE ARTICLE
+  ========================================================= */
+
   async function deleteArticle(
     id,
     title
   ) {
-    const confirmed = window.confirm(
-      `Delete "${title}"?\n\nThis cannot be undone.`
-    );
+    const confirmed =
+      window.confirm(
+        `Delete "${title}"?\n\nThis cannot be undone.`
+      );
 
     if (!confirmed) {
       return;
@@ -367,14 +468,21 @@ export default function AdminPanel() {
     setMessage("");
 
     try {
-      const response = await fetch(
-        `/api/articles?id=${encodeURIComponent(id)}`,
-        {
-          method: "DELETE",
-        }
-      );
+      const response =
+        await fetch(
+          `/api/articles?id=${encodeURIComponent(
+            id
+          )}`,
+          {
+            method: "DELETE",
+            credentials: "include",
+          }
+        );
 
-      const data = await response.json();
+      const data =
+        await response
+          .json()
+          .catch(() => ({}));
 
       if (!response.ok) {
         throw new Error(
@@ -383,7 +491,9 @@ export default function AdminPanel() {
         );
       }
 
-      setMessage("Article deleted.");
+      setMessage(
+        "Article deleted successfully."
+      );
 
       if (form.id === id) {
         resetForm();
@@ -405,12 +515,17 @@ export default function AdminPanel() {
     }
   }
 
+  /* =========================================================
+     LOGOUT
+  ========================================================= */
+
   async function logout() {
     try {
       await fetch(
         "/api/logout",
         {
           method: "POST",
+          credentials: "include",
         }
       );
     } catch (error) {
@@ -425,9 +540,10 @@ export default function AdminPanel() {
     }
   }
 
-  /*
-   * LOGIN SCREEN
-   */
+  /* =========================================================
+     LOGIN SCREEN
+  ========================================================= */
+
   if (!logged) {
     return (
       <main className="admin-shell">
@@ -457,6 +573,7 @@ export default function AdminPanel() {
                   )
                 }
                 required
+                autoComplete="email"
               />
             </label>
 
@@ -472,6 +589,7 @@ export default function AdminPanel() {
                   )
                 }
                 required
+                autoComplete="current-password"
               />
             </label>
 
@@ -495,11 +613,13 @@ export default function AdminPanel() {
     );
   }
 
-  /*
-   * ADMIN PANEL
-   */
+  /* =========================================================
+     ADMIN PANEL
+  ========================================================= */
+
   return (
     <main className="admin-shell">
+
       <style jsx global>{`
         .admin-grid {
           max-width: 1250px;
@@ -720,7 +840,13 @@ export default function AdminPanel() {
       </div>
 
       <div className="admin-grid">
+
+        {/* =====================================================
+            EDITOR
+        ===================================================== */}
+
         <section className="editor-card">
+
           <div className="editor-title">
             <div>
               <p className="eyebrow">
@@ -752,6 +878,7 @@ export default function AdminPanel() {
             className="editor"
             onSubmit={saveArticle}
           >
+
             <label>
               Headline
 
@@ -835,10 +962,15 @@ export default function AdminPanel() {
               />
             </label>
 
+            {/* =================================================
+                PDF
+            ================================================= */}
+
             <label>
               Article PDF
 
               <div className="pdf-upload-box">
+
                 <strong>
                   {editing
                     ? "Replace PDF (optional)"
@@ -848,18 +980,10 @@ export default function AdminPanel() {
                 <input
                   id="article-pdf"
                   type="file"
-                  accept="application/pdf,.pdf"
-                  onChange={(e) => {
-                    const selectedFile =
-                      e.target.files?.[0] ||
-                      null;
-
-                    setPdfFile(
-                      selectedFile
-                    );
-
-                    setMessage("");
-                  }}
+                  accept=".pdf,application/pdf"
+                  onChange={
+                    handlePdfChange
+                  }
                   disabled={busy}
                 />
 
@@ -869,7 +993,15 @@ export default function AdminPanel() {
                       Selected:
                     </strong>{" "}
                     {pdfFile.name}
+
                     <br />
+
+                    Type:{" "}
+                    {pdfFile.type ||
+                      "PDF"}
+
+                    <br />
+
                     Size:{" "}
                     {(
                       pdfFile.size /
@@ -885,6 +1017,7 @@ export default function AdminPanel() {
                   !pdfFile && (
                     <div className="pdf-existing">
                       Existing PDF:{" "}
+
                       <a
                         href={
                           form.pdfUrl
@@ -899,12 +1032,9 @@ export default function AdminPanel() {
 
                 <div className="pdf-note">
                   PDF only. Maximum file
-                  size: 25 MB. The original
-                  PDF is uploaded unchanged,
-                  including its text, images,
-                  graphs, fonts, layout and
-                  page formatting.
+                  size: 25 MB.
                 </div>
+
               </div>
             </label>
 
@@ -924,11 +1054,18 @@ export default function AdminPanel() {
                 {message}
               </div>
             )}
+
           </form>
         </section>
 
+        {/* =====================================================
+            ARTICLE MANAGER
+        ===================================================== */}
+
         <section className="article-manager">
+
           <div className="editor-title">
+
             <div>
               <p className="eyebrow">
                 CONTENT MANAGEMENT
@@ -942,89 +1079,118 @@ export default function AdminPanel() {
             <span className="article-count">
               {articles.length}
             </span>
+
           </div>
 
           {articles.length === 0 ? (
+
             <div className="manager-empty">
               No articles yet.
             </div>
+
           ) : (
+
             <div className="manager-list">
+
               {articles.map(
-                (article) => (
-                  <div
-                    className="manager-item"
-                    key={article.id}
-                  >
-                    <div className="manager-info">
-                      <span className="tag">
-                        {
-                          article.categoryLabel
-                        }
-                      </span>
+                (article) => {
 
-                      <h3>
-                        {article.title}
-                      </h3>
+                  const pdfUrl =
+                    article.pdfUrl ||
+                    article.pdf_url ||
+                    "";
 
-                      <div className="manager-meta">
-                        <span
-                          className={`status ${article.status}`}
-                        >
-                          {article.status}
-                        </span>
+                  return (
+                    <div
+                      className="manager-item"
+                      key={article.id}
+                    >
 
-                        <span>
-                          {article.date}
-                        </span>
-                      </div>
-                    </div>
+                      <div className="manager-info">
 
-                    <div className="manager-actions">
-                      {article.pdfUrl && (
-                        <a
-                          href={
-                            article.pdfUrl
+                        <span className="tag">
+                          {
+                            article.categoryLabel
                           }
-                          target="_blank"
-                          rel="noreferrer"
+                        </span>
+
+                        <h3>
+                          {article.title}
+                        </h3>
+
+                        <div className="manager-meta">
+
+                          <span
+                            className={`status ${article.status}`}
+                          >
+                            {
+                              article.status
+                            }
+                          </span>
+
+                          <span>
+                            {
+                              article.date
+                            }
+                          </span>
+
+                        </div>
+
+                      </div>
+
+                      <div className="manager-actions">
+
+                        {pdfUrl && (
+                          <a
+                            href={pdfUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="small-btn"
+                          >
+                            PDF
+                          </a>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            startEdit(
+                              article
+                            )
+                          }
                           className="small-btn"
+                          disabled={busy}
                         >
-                          PDF
-                        </a>
-                      )}
+                          EDIT
+                        </button>
 
-                      <button
-                        onClick={() =>
-                          startEdit(
-                            article
-                          )
-                        }
-                        className="small-btn"
-                        disabled={busy}
-                      >
-                        EDIT
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            deleteArticle(
+                              article.id,
+                              article.title
+                            )
+                          }
+                          className="small-btn danger"
+                          disabled={busy}
+                        >
+                          DELETE
+                        </button>
 
-                      <button
-                        onClick={() =>
-                          deleteArticle(
-                            article.id,
-                            article.title
-                          )
-                        }
-                        className="small-btn danger"
-                        disabled={busy}
-                      >
-                        DELETE
-                      </button>
+                      </div>
+
                     </div>
-                  </div>
-                )
+                  );
+                }
               )}
+
             </div>
+
           )}
+
         </section>
+
       </div>
     </main>
   );
