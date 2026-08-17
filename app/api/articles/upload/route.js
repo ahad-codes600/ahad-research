@@ -12,7 +12,6 @@ async function authed() {
 
 export async function POST(req) {
   try {
-    // Admin authentication
     if (!(await authed())) {
       return NextResponse.json(
         { error: "Unauthorized" },
@@ -20,12 +19,17 @@ export async function POST(req) {
       );
     }
 
-    // We are receiving the PDF directly.
-    // NO multipart/form-data is used.
     const contentType =
       req.headers.get("content-type") || "";
 
-    if (!contentType.toLowerCase().startsWith("application/pdf")) {
+    console.log(
+      "PDF UPLOAD CONTENT-TYPE:",
+      contentType
+    );
+
+    if (
+      !contentType.includes("application/pdf")
+    ) {
       return NextResponse.json(
         {
           error:
@@ -35,12 +39,21 @@ export async function POST(req) {
       );
     }
 
-    const contentLength =
-      Number(req.headers.get("content-length") || "0");
+    const body = await req.arrayBuffer();
+
+    if (!body || body.byteLength === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "The uploaded PDF is empty."
+        },
+        { status: 400 }
+      );
+    }
 
     if (
-      contentLength &&
-      contentLength > 25 * 1024 * 1024
+      body.byteLength >
+      25 * 1024 * 1024
     ) {
       return NextResponse.json(
         {
@@ -51,52 +64,16 @@ export async function POST(req) {
       );
     }
 
-    const buffer = Buffer.from(
-      await req.arrayBuffer()
-    );
-
-    if (!buffer.length) {
-      return NextResponse.json(
-        {
-          error: "The PDF file is empty."
-        },
-        { status: 400 }
-      );
-    }
-
-    if (buffer.length > 25 * 1024 * 1024) {
-      return NextResponse.json(
-        {
-          error:
-            "PDF must be smaller than 25 MB."
-        },
-        { status: 400 }
-      );
-    }
-
-    const originalName =
-      req.headers.get("x-file-name") ||
-      "article.pdf";
-
-    const safeName = decodeURIComponent(
-      originalName
-    )
-      .replace(/\.pdf$/i, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 80);
-
-    const fileName =
-      `${Date.now()}-${safeName || "article"}.pdf`;
-
     const supabaseUrl =
       process.env.SUPABASE_URL;
 
     const serviceRoleKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!supabaseUrl || !serviceRoleKey) {
+    if (
+      !supabaseUrl ||
+      !serviceRoleKey
+    ) {
       return NextResponse.json(
         {
           error:
@@ -106,25 +83,45 @@ export async function POST(req) {
       );
     }
 
+    const originalName =
+      req.headers.get(
+        "x-file-name"
+      ) || "article.pdf";
+
+    const safeName =
+      decodeURIComponent(originalName)
+        .replace(/\.pdf$/i, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 80);
+
+    const fileName =
+      `${Date.now()}-${safeName || "article"}.pdf`;
+
     const uploadUrl =
       `${supabaseUrl}/storage/v1/object/articles/${fileName}`;
 
-    const response = await fetch(
-      uploadUrl,
-      {
+    const response =
+      await fetch(uploadUrl, {
         method: "POST",
+
         headers: {
           Authorization:
             `Bearer ${serviceRoleKey}`,
-          apikey: serviceRoleKey,
+
+          apikey:
+            serviceRoleKey,
+
           "Content-Type":
             "application/pdf",
+
           "x-upsert":
             "false"
         },
-        body: buffer
-      }
-    );
+
+        body: Buffer.from(body)
+      });
 
     if (!response.ok) {
       const errorText =

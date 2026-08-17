@@ -234,74 +234,81 @@ export default function AdminPanel() {
      multipart/form-data; boundary=...
   ========================================================= */
 
-  async function uploadPdf() {
-    if (!pdfFile) {
-      return null;
-    }
+ async function uploadPdf() {
+  if (!pdfFile) {
+    throw new Error("Please select a PDF file.");
+  }
 
-    const fileName =
-      String(pdfFile.name || "").toLowerCase();
+  const fileName =
+    String(pdfFile.name || "").toLowerCase();
 
-    const isPdf =
-      fileName.endsWith(".pdf") ||
-      pdfFile.type === "application/pdf" ||
-      pdfFile.type === "application/octet-stream" ||
-      pdfFile.type === "";
+  const isPdf =
+    fileName.endsWith(".pdf") ||
+    pdfFile.type === "application/pdf" ||
+    pdfFile.type === "application/octet-stream" ||
+    pdfFile.type === "";
 
-    if (!isPdf) {
-      throw new Error(
-        "Please select a PDF file."
-      );
-    }
+  if (!isPdf) {
+    throw new Error("Please select a PDF file.");
+  }
 
-    if (
-      pdfFile.size >
-      25 * 1024 * 1024
-    ) {
-      throw new Error(
-        "PDF must be smaller than 25 MB."
-      );
-    }
+  if (
+    pdfFile.size >
+    25 * 1024 * 1024
+  ) {
+    throw new Error(
+      "PDF must be smaller than 25 MB."
+    );
+  }
 
-    const uploadData =
-      new FormData();
+  if (pdfFile.size === 0) {
+    throw new Error(
+      "The selected PDF is empty."
+    );
+  }
 
-    uploadData.append(
-      "file",
-      pdfFile,
-      pdfFile.name
+  const response =
+    await fetch(
+      "/api/articles/upload",
+      {
+        method: "POST",
+
+        credentials: "include",
+
+        headers: {
+          "Content-Type":
+            "application/pdf",
+
+          "X-File-Name":
+            encodeURIComponent(
+              pdfFile.name
+            )
+        },
+
+        body: pdfFile
+      }
     );
 
-    const response =
-      await fetch(
-        "/api/articles/upload",
-        {
-          method: "POST",
-          credentials: "include",
-          body: uploadData,
-        }
-      );
+  const data =
+    await response
+      .json()
+      .catch(() => ({}));
 
-    const data =
-      await response
-        .json()
-        .catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(
-        data.error ||
-          `PDF upload failed (${response.status}).`
-      );
-    }
-
-    if (!data.url) {
-      throw new Error(
-        "PDF uploaded, but the server did not return a PDF URL."
-      );
-    }
-
-    return data.url;
+  if (!response.ok) {
+    throw new Error(
+      data.error ||
+        `PDF upload failed (${response.status}).`
+    );
   }
+
+  if (!data.url) {
+    throw new Error(
+      "PDF uploaded, but no PDF URL was returned."
+    );
+  }
+
+  return data.url;
+ }
 
   /* =========================================================
      SAVE / PUBLISH ARTICLE
