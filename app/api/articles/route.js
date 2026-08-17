@@ -2,10 +2,12 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+
 import {
   COOKIE,
   verifySession,
 } from "../../../lib/auth";
+
 import {
   getAllArticles,
   createArticle,
@@ -18,80 +20,6 @@ async function authed() {
   return verifySession(c.get(COOKIE)?.value);
 }
 
-async function uploadPDF(file) {
-  if (!file || file.size === 0) {
-    throw new Error("PDF file is required.");
-  }
-
-  if (file.type !== "application/pdf") {
-    throw new Error("Only PDF files are allowed.");
-  }
-
-  // 50 MB maximum
-  if (file.size > 50 * 1024 * 1024) {
-    throw new Error("PDF must be smaller than 50 MB.");
-  }
-
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error(
-      "Supabase server environment variables are missing."
-    );
-  }
-
-  const { createClient } = await import(
-    "@supabase/supabase-js"
-  );
-
-  const supabase = createClient(
-    supabaseUrl,
-    serviceRoleKey,
-    {
-      auth: {
-        persistSession: false,
-      },
-    }
-  );
-
-  const safeName = file.name
-    .replace(/[^a-zA-Z0-9._-]/g, "-")
-    .replace(/-+/g, "-");
-
-  const filePath = `research/${crypto.randomUUID()}-${safeName}`;
-
-  const buffer = Buffer.from(
-    await file.arrayBuffer()
-  );
-
-  const { error } = await supabase.storage
-    .from("articles")
-    .upload(filePath, buffer, {
-      contentType: "application/pdf",
-      upsert: false,
-    });
-
-  if (error) {
-    throw error;
-  }
-
-  const {
-    data: { publicUrl },
-  } = supabase.storage
-    .from("articles")
-    .getPublicUrl(filePath);
-
-  if (!publicUrl) {
-    throw new Error(
-      "Could not generate PDF public URL."
-    );
-  }
-
-  return publicUrl;
-}
-
 export async function GET() {
   if (!(await authed())) {
     return NextResponse.json(
@@ -101,10 +29,10 @@ export async function GET() {
   }
 
   try {
+    const articles = await getAllArticles();
+
     return NextResponse.json(
-      {
-        articles: await getAllArticles(),
-      },
+      { articles },
       {
         headers: {
           "Cache-Control": "no-store",
@@ -137,45 +65,27 @@ export async function POST(req) {
   }
 
   try {
-    const formData = await req.formData();
+    // /api/articles receives JSON.
+    // PDF uploading happens separately at:
+    // /api/articles/upload
+    const body = await req.json();
 
-    const title = formData.get("title");
-    const category = formData.get("category");
-    const excerpt = formData.get("excerpt") || "";
-    const status =
-      formData.get("status") || "published";
-    const pdf = formData.get("pdf");
-
-    if (!title || !category) {
+    if (
+      !body.title ||
+      !body.category ||
+      (!body.content && !body.pdfUrl)
+    ) {
       return NextResponse.json(
         {
           error:
-            "Title and category are required.",
+            "Title, category and article content or PDF are required.",
         },
         { status: 400 }
       );
     }
 
-    if (!pdf || typeof pdf === "string") {
-      return NextResponse.json(
-        {
-          error:
-            "Please select a PDF before publishing.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const pdfUrl = await uploadPDF(pdf);
-
-    const article = await createArticle({
-      title,
-      category,
-      excerpt,
-      content: "",
-      status,
-      pdf_url: pdfUrl,
-    });
+    const article =
+      await createArticle(body);
 
     return NextResponse.json(
       { article },
@@ -207,46 +117,18 @@ export async function PUT(req) {
   }
 
   try {
-    const formData = await req.formData();
+    const body = await req.json();
 
-    const id = formData.get("id");
-    const title = formData.get("title");
-    const category = formData.get("category");
-    const excerpt = formData.get("excerpt") || "";
-    const status =
-      formData.get("status") || "published";
-    const pdf = formData.get("pdf");
-
-    if (!id || !title || !category) {
-      return NextResponse.json(
-        {
-          error:
-            "Article ID, title and category are required.",
-        },
-        { status: 400 }
-      );
-    }
-
-    let pdfUrl;
-
-    if (pdf && typeof pdf !== "string") {
-      pdfUrl = await uploadPDF(pdf);
-    }
-
-    const article = await updateArticle({
-      id,
-      title,
-      category,
-      excerpt,
-      content: "",
-      status,
-      ...(pdfUrl ? { pdf_url: pdfUrl } : {}),
-    });
+    const article =
+      await updateArticle(body);
 
     return article
       ? NextResponse.json({ article })
       : NextResponse.json(
-          { error: "Article not found." },
+          {
+            error:
+              "Article not found.",
+          },
           { status: 404 }
         );
   } catch (error) {
@@ -274,17 +156,34 @@ export async function DELETE(req) {
     );
   }
 
-  const id = new URL(req.url).searchParams.get(
-    "id"
-  );
+  const id =
+    new URL(req.url)
+      .searchParams
+      .get("id");
+
+  if (!id) {
+    return NextResponse.json(
+      {
+        error:
+          "Article ID is required.",
+      },
+      { status: 400 }
+    );
+  }
 
   try {
-    const ok = await deleteArticle(id);
+    const ok =
+      await deleteArticle(id);
 
     return ok
-      ? NextResponse.json({ ok: true })
+      ? NextResponse.json({
+          ok: true,
+        })
       : NextResponse.json(
-          { error: "Article not found." },
+          {
+            error:
+              "Article not found.",
+          },
           { status: 404 }
         );
   } catch (error) {
